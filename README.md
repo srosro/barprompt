@@ -9,27 +9,33 @@ $ python -m ./barprompt.py
 > # The app that integrates langfuse (prompt management) into promptfoo (prompt evaluation)
 > #####################################
 > 
-> Langfuse API enviornment credentials do not exist or are not valid, using the Natan org's public read-only keys... 
+> Langfuse API environment credentials do not exist or are invalid, using the Natan org's public read-only keys... 
 > Please input the name of a prompt:
 $ message-enricher-v2-all-afects
 
-> Great, there are 10 versions please input a version number or hit (enter) for the latest version:
+> Great, there are 10 versions. Please input a version number or hit (enter) for the latest version:
 $ 10
 
 > Great, please input the name of another prompt, or hit (enter) to list datasets:
 $ message-enricher-v2-negative-afect-optimized
 
-> Great, there are 5 versions please input a version number or hit (enter) for the latest version:
+> Great, there are 5 versions. Please input a version number or hit (enter) for the latest version:
 $ 3
 
 > Great, please input the name of another prompt, or hit (enter) to list datasets:
 $ (enter)
 
-> Plese choose a dataset to evaluate those prompts against.  Options:
+> Please choose a dataset to evaluate those prompts against.  Options:
 >
 > 1. all-affects
 > 2. negative-affects
 $ 1
+
+> Great! Please input the LLM Model Name, or hit (enter) to choose temperature:
+> gpt-4o
+
+> Great! Please input the value for temperature, or hit (enter):
+> 0.7
 
 > Great, we'll evaluate:
 > - message-enricher-v2-all-afects v10
