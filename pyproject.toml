@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "barprompt"
+version = "0.1.0"
+description = "A simple tool to test and compare prompts."
+authors = ["Deep Parikh <deepparikhsd@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+promptfoo = "^0.1.0"
+langfuse = "^2.60.2"
+pyyaml = "^6.0.2"
+python-dotenv = "^1.1.0"
+openai = "^1.72.0"
+pandas = "^2.2.3"
+pytz = "^2025.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
