@@ -3,48 +3,25 @@
 An open CLI to connect Langfuse prompts to Promptfoo's Eval.  After creating an environment file with your OpenAI, Anthropic, etc API keys, you can run...
 
 ```
-$ python -m ./barprompt.py
+$ poetry python barprompt.py
 > #####################################
 > # Welcome to BARPROMPT
 > # The app that integrates langfuse (prompt management) into promptfoo (prompt evaluation)
 > #####################################
-> 
-> Langfuse API environment credentials do not exist or are invalid, using the Natan org's public read-only keys... 
-> Please input the name of a prompt:
-$ message-enricher-v2-all-afects
+>  
+> Please input the name of the prompt:
+$ message-enricher
 
-> Great, there are 10 versions. Please input a version number or hit (enter) for the latest version:
+> Great! Please input the version:
 $ 10
 
-> Great, please input the name of another prompt, or hit (enter) to list datasets:
-$ message-enricher-v2-negative-afect-optimized
-
-> Great, there are 5 versions. Please input a version number or hit (enter) for the latest version:
-$ 3
-
-> Great, please input the name of another prompt, or hit (enter) to list datasets:
-$ (enter)
-
-> Please choose a dataset to evaluate those prompts against.  Options:
->
-> 1. all-affects
-> 2. negative-affects
-$ 1
-
-> Great! Please input the LLM Model Name, or hit (enter) to choose temperature:
-> gpt-4o
-
-> Great! Please input the value for temperature, or hit (enter):
-> 0.7
+> Great! Please input the name of the dataset:
+$ check_performance
 
 > Great, we'll evaluate:
-> - message-enricher-v2-all-afects v10
-> - message-enricher-v2-negative-afect-optimized v3
-> against the all-affects dataset, which will be 1,250 LLM queries.  Do you want to:
-> 
-> 1. Create the promptfoo yaml file
-> 2. Run promptfoo directly and view the results
-$ 2
+> - message-enricher (v10) with dataset check_performance, which will be 1,250 LLM queries. Continue (y/n):
+$ y
+
+> Experiment complete. You can find this experiment in https://padmin.codel.one/project/cm9aqr01i000mp907usz9ezvz/datasets/cm9cl3u4h0012p907ttsfx7ec
 ```
 
-**(script creates the yaml file, runs promptfoo eval, and then runs promptfoo view)**
