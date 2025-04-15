@@ -3,6 +3,7 @@ Common utilities for processing cleaned message data across different formats.
 """
 
 import csv
+import json
 from datetime import datetime
 import logging
 import os
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 # Add constant with environment variable fallback
 NUM_WORKERS = int(os.getenv("MESSAGE_PROCESSOR_WORKERS", 10))
+
+PACIFIC_TZ = pytz.timezone("US/Pacific")
+UTC_TZ = pytz.UTC
 
 
 def format_time(seconds: float) -> str:
@@ -297,6 +301,141 @@ def enrich_and_load_messages(
     return result
 
 
+def clean_sms_data(input_path: str, output_path: str) -> list[str]:
+    """
+    Clean raw SMS data and save it into a consistent format.
+
+    Args:
+        input_path (str): Path to the input CSV file.
+        output_path (str): Path to the output CSV file.
+
+    Returns:
+        list[str]: List of paths to cleaned files.
+
+    Raises:
+        FileNotFoundError: If the input file doesn't exist.
+        ValueError: If the input file is not a CSV or has invalid format.
+    """
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    if not input_path.endswith(".csv"):
+        raise ValueError("Input file must be a CSV file")
+
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    cleaned_files = []
+    person_2_phone = json.loads(os.getenv("PERSON_2"))["phone"]
+
+    try:
+        with (
+            open(input_path, "r", encoding="utf-8-sig") as infile,
+            open(output_path, "w", newline="", encoding="utf-8") as outfile,
+        ):
+            reader = csv.DictReader(infile)
+
+            # Validate required columns
+            required_columns = [
+                "Message Date",
+                "Sender Name",
+                "Sender ID",
+                "Type",
+                "Text",
+                "SPAFF - 1",
+                "SPAFF - 2",
+                "SPAFF - 3",
+            ]
+            missing_columns = [
+                col for col in required_columns if col not in reader.fieldnames
+            ]
+            if missing_columns:
+                raise ValueError(
+                    f"Input CSV missing required columns: {', '.join(missing_columns)}"
+                )
+
+            writer = csv.DictWriter(
+                outfile, fieldnames=["person_id", "timestamp", "message"]
+            )
+            writer.writeheader()
+
+            current_message = None
+            latest_timestamp = None
+
+            for row in reader:
+                try:
+                    # Determine person_id based on message type
+                    if row["Type"] == "Incoming":
+                        if not person_2_phone:
+                            raise ValueError("PERSON_2 environment variable not set")
+                        if row["Sender ID"] != person_2_phone:
+                            logger.warning(f"Unexpected sender ID: {row['Sender ID']}")
+                        current_person_id = 2
+                    else:
+                        current_person_id = 1
+
+                    # Parse timestamp in Pacific time and convert to UTC
+                    try:
+                        utc_dt = PACIFIC_TZ.localize(
+                            datetime.strptime(row["Message Date"], "%Y-%m-%d %H:%M:%S")
+                        ).astimezone(UTC_TZ)
+                    except ValueError:
+                        logger.error(f"Invalid timestamp format: {row['Message Date']}")
+                        continue
+
+                    message = row["Text"]
+
+                    # Handle attachments
+                    attachment = row.get("Attachment")
+                    if attachment:
+                        message += f" [Attachment: {attachment}]"
+
+                    new_message = {
+                        "person_id": current_person_id,
+                        "timestamp": utc_dt.isoformat(),
+                        "message": message,
+                    }
+
+                    if current_message is None:
+                        current_message = new_message
+                        latest_timestamp = utc_dt
+                    else:
+                        time_diff = (utc_dt - latest_timestamp).total_seconds()
+
+                        if (
+                            time_diff <= 5
+                            and new_message["person_id"] == current_message["person_id"]
+                        ):
+                            # Combine messages
+                            current_message["message"] += ". " + new_message["message"]
+                            # Update only the latest_timestamp for comparison
+                            latest_timestamp = utc_dt
+                        else:
+                            # Write the current message and start a new one
+                            writer.writerow(current_message)
+                            current_message = new_message
+                            latest_timestamp = utc_dt
+
+                except Exception as e:
+                    logger.error(f"Error processing row: {e.with_traceback()}")
+                    continue
+
+            # Write the last message if it exists
+            if current_message:
+                writer.writerow(current_message)
+
+        cleaned_files.append(output_path)
+        logger.info(f"SMS data cleaning completed. Output saved to: {output_path}")
+
+    except Exception as e:
+        logger.error(f"Error cleaning SMS data: {e}")
+        raise
+
+    return cleaned_files
+
+
 def convert_mock_data_to_dict(file_path: str) -> dict:
     """
     Convert mock data CSV to a dictionary where keys are datetime objects and values are lists of SPAFF codes.
@@ -307,8 +446,6 @@ def convert_mock_data_to_dict(file_path: str) -> dict:
     Returns:
         dict: Dictionary with datetime keys and SPAFF code lists as values
     """
-    PACIFIC_TZ = pytz.timezone("US/Pacific")
-    UTC_TZ = pytz.UTC
     # Read the CSV file
     df = pd.read_csv(file_path)
 
@@ -336,18 +473,17 @@ def convert_mock_data_to_dict(file_path: str) -> dict:
 
 
 if __name__ == "__main__":
-    result_dict = convert_mock_data_to_dict(
-        "/home/ubuntu/Projects/barprompt/mock_data.csv"
-    )
+    input_path = "/home/ubuntu/Projects/barprompt/mock_data.csv"
+    output_path = "/home/ubuntu/Projects/barprompt/cleaned_data.csv"
+    result_dict = convert_mock_data_to_dict(input_path)
+    clean_sms_data(input_path=input_path, output_path=output_path)
     result = enrich_and_load_messages(
-        file_path="/home/ubuntu/Projects/barprompt/20250409_185158_mock_data_clean.csv",
+        file_path=output_path,
         result_dict=result_dict,
     )
     for key, item in result.items():
         langfuse.create_dataset_item(
             dataset_name="check_performance",
-            # any python object or value
             input=item["input"],
-            # any python object or value, optional
             expected_output=item["expected_output"],
         )
