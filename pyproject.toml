@@ -21,10 +21,30 @@ barprompt = "barprompt:main"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^4.2.0"
+mypy = "^1.15.0"
+black = "^25.1.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
 
 [tool.ruff]
 # Enable autofix behavior
@@ -94,3 +114,30 @@ max-complexity = 10
 # pydocstyle settings
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+# mypy configuration
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+# Stricter options
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+strict_equality = true
+implicit_reexport = false  # No longer implicitly re-export imported names
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false

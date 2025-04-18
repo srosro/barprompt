@@ -79,7 +79,7 @@ def validate_against_langfuse(
 
 
 @observe()
-def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient) -> str:
+def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient) -> str | None:
     """Run the evaluation of a prompt with input data.
 
     Args:
@@ -94,11 +94,12 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
         {"role": "user", "content": str(input_data)},
     ]
 
-    return (
+    completion: str | None = (
         openai.chat.completions.create(model="gpt-4o", messages=messages, langfuse_prompt=prompt)
         .choices[0]
         .message.content
     )
+    return completion
 
 
 def load_evaluation_config(config_file: str = "evaluation_config.yaml") -> dict[str, list[dict[str, Any]]]:
@@ -112,7 +113,11 @@ def load_evaluation_config(config_file: str = "evaluation_config.yaml") -> dict[
     """
     try:
         with Path(config_file).open() as file:
-            return yaml.safe_load(file)
+            config = yaml.safe_load(file)
+            if config is None:
+                return {"evaluations": []}
+            # Ensure proper typing for return value
+            return config if isinstance(config, dict) else {"evaluations": []}
     except FileNotFoundError:
         print(f"Warning: Evaluation config file '{config_file}' not found. Using default evaluation.")
         # Return a default configuration
@@ -130,12 +135,18 @@ def load_evaluation_config(config_file: str = "evaluation_config.yaml") -> dict[
         return {"evaluations": []}
 
 
-def extract_expected_value(expected_output: str | dict[str, Any], eval_key: str | None) -> str | dict[str, Any]:
+def extract_expected_value(
+    expected_output: str | dict[str, Any] | list[Any],
+    eval_key: str | None,
+) -> str | dict[str, Any] | list[Any]:
     """Extract the expected value from the expected output.
 
     Args:
         expected_output: The expected output
         eval_key: The key to extract from the expected output
+
+    Returns:
+        The extracted value from the expected output
     """
     expected_value = expected_output
     if eval_key is not None and isinstance(expected_value, str):
@@ -221,7 +232,7 @@ def run_experiment(prompt: PromptClient, dataset: DatasetClient, experiment: str
         concurrent.futures.wait(futures)
 
 
-def extract_output_value(output: str | dict[str, Any], key: str | None = None) -> str | dict[str, Any]:
+def extract_output_value(output: str | None, key: str | None = None) -> str | dict[str, Any] | None:
     """Extract the value from the output.
 
     Args:
@@ -237,15 +248,13 @@ def extract_output_value(output: str | dict[str, Any], key: str | None = None) -
         except json.JSONDecodeError:
             # Not valid JSON, use as is
             pass
-    elif isinstance(output, dict) and key in output:
-        output_value = output[key]
     return output_value
 
 
 @observe()
 def llm_judge_evaluation(
-    output: str | dict[str, Any],
-    expected_output: str | dict[str, Any],
+    output: str | None,
+    expected_output: str | dict[str, Any] | list[Any],
     judge_prompt_name: str,
     judge_prompt_version: int = 1,
     key: str | None = None,
@@ -263,7 +272,7 @@ def llm_judge_evaluation(
         A score between 0-1 indicating the quality of the match
     """
     # Extract values if key is provided and values are valid JSON
-    output_value = output
+    output_value: str | dict[str, Any] | None = output
     expected_value = expected_output
 
     if key is not None:
@@ -312,7 +321,7 @@ def llm_judge_evaluation(
 
 
 def simple_exact_comparison(
-    output: str | dict[str, Any],
+    output: str | None,
     expected_output: str | dict[str, Any],
     key: str | None = None,
 ) -> int:
@@ -329,39 +338,18 @@ def simple_exact_comparison(
         1 if the output matches expected_output, 0 otherwise
     """
     # Extract values if key is provided and values are valid JSON
-    output_value = output
-    expected_value = expected_output
+    output_value: str | dict[str, Any] | None = output
+    expected_value: str | dict[str, Any] | list[Any] = expected_output
 
     if key is not None:
-        # Try to extract the key from output if it's JSON
-        if isinstance(output, str):
-            try:
-                output_json = json.loads(output)
-                if isinstance(output_json, dict) and key in output_json:
-                    output_value = output_json[key]
-            except json.JSONDecodeError:
-                # Not valid JSON, use as is
-                pass
-        elif isinstance(output, dict) and key in output:
-            output_value = output[key]
-
-        # Try to extract the key from expected_output if it's JSON
-        if isinstance(expected_output, str):
-            try:
-                expected_json = json.loads(expected_output)
-                if isinstance(expected_json, dict) and key in expected_json:
-                    expected_value = expected_json[key]
-            except json.JSONDecodeError:
-                # Not valid JSON, use as is
-                pass
-        elif isinstance(expected_output, dict) and key in expected_output:
-            expected_value = expected_output[key]
+        output_value = extract_output_value(output, key)
+        expected_value = extract_expected_value(expected_output, key)
 
     return 1 if output_value == expected_value else 0
 
 
 def list_inclusion_comparison(
-    output: str | dict[str, Any],
+    output: str | None,
     expected_output: str | dict[str, Any] | list[Any],
     key: str | None = None,
 ) -> int:
@@ -378,20 +366,10 @@ def list_inclusion_comparison(
         1 if the output is in the expected_output list, 0 otherwise
     """
     # Extract values if key is provided and values are valid JSON
-    output_value = output
+    output_value: str | dict[str, Any] | None = output
 
     if key is not None:
-        # Try to extract the key from output if it's JSON
-        if isinstance(output, str):
-            try:
-                output_json = json.loads(output)
-                if isinstance(output_json, dict) and key in output_json:
-                    output_value = output_json[key]
-            except json.JSONDecodeError:
-                # Not valid JSON, use as is
-                pass
-        elif isinstance(output, dict) and key in output:
-            output_value = output[key]
+        output_value = extract_output_value(output, key)
 
     # Ensure expected_output is a list
     if not isinstance(expected_output, list):
