@@ -41,4 +41,7 @@ ENV/
 htmlcov/
 
 # Poetry
-poetry.lock 
+poetry.lock
+
+# Test file
+test.py

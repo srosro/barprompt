@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A simple tool to test and compare prompts."
 authors = ["Deep Parikh <deepparikhsd@gmail.com>"]
 readme = "README.md"
+packages = [{include = "../barprompt"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -15,6 +16,8 @@ openai = "^1.72.0"
 pandas = "^2.2.3"
 pytz = "^2025.2"
 
+[tool.poetry.scripts]
+barprompt = "barprompt:main"
 
 [build-system]
 requires = ["poetry-core"]
