@@ -56,9 +56,7 @@ def run_prompt_evaluation(input_data, prompt):
     ]
 
     completion = (
-        openai.chat.completions.create(
-            model="gpt-4o", messages=messages, langfuse_prompt=prompt
-        )
+        openai.chat.completions.create(model="gpt-4o", messages=messages, langfuse_prompt=prompt)
         .choices[0]
         .message.content
     )
@@ -93,9 +91,7 @@ def load_evaluation_config(config_file="evaluation_config.yaml"):
             config = yaml.safe_load(file)
         return config
     except FileNotFoundError:
-        print(
-            f"Warning: Evaluation config file '{config_file}' not found. Using default evaluation."
-        )
+        print(f"Warning: Evaluation config file '{config_file}' not found. Using default evaluation.")
         # Return a default configuration
         return {
             "evaluations": [
@@ -114,14 +110,6 @@ def load_evaluation_config(config_file="evaluation_config.yaml"):
 def process_item(item, prompt, experiment):
     with item.observe(run_name=experiment) as trace_id:
         output = run_prompt_evaluation(item.input, prompt)
-        # output_dict = json.loads(output)
-        # affect = output_dict.get("affect", None)
-        # print(affect)
-        # if affect.startswith("Other-"):
-        #     affect = "Neutral"
-        # elif affect.startswith("Partner-"):
-        #     affect = affect.replace("Partner-", "", 1)
-        # is_correct = affect in item.expected_output
 
         # Load evaluation configuration
         eval_config = load_evaluation_config()
@@ -131,15 +119,12 @@ def process_item(item, prompt, experiment):
             eval_name = eval_item.get("name", "unnamed_evaluation")
             eval_function = eval_item.get("function", "simple_exact_comparison")
             eval_key = eval_item.get("key", None)
+            score_only_for = eval_item.get("score_only_for", None)
 
             # Determine which evaluation function to use
             if eval_function == "llm_judge_evaluation":
-                judge_prompt_name = eval_item.get("args", {}).get(
-                    "judge_prompt_name", "default_judge"
-                )
-                judge_prompt_version = eval_item.get("args", {}).get(
-                    "judge_prompt_version", "latest"
-                )
+                judge_prompt_name = eval_item.get("args", {}).get("judge_prompt_name", "default_judge")
+                judge_prompt_version = eval_item.get("args", {}).get("judge_prompt_version", 1)
 
                 eval_score = llm_judge_evaluation(
                     output,
@@ -149,48 +134,49 @@ def process_item(item, prompt, experiment):
                     eval_key,
                 )
             elif eval_function == "list_inclusion_comparison":
-                eval_score = list_inclusion_comparison(
-                    output, item.expected_output, eval_key
-                )
+                eval_score = list_inclusion_comparison(output, item.expected_output, eval_key)
             else:  # Default to simple_exact_comparison
-                eval_score = simple_exact_comparison(
-                    output, item.expected_output, eval_key
+                eval_score = simple_exact_comparison(output, item.expected_output, eval_key)
+
+            # Determine if the score should be recorded based on the score_only_for parameter
+            should_score = True
+            if score_only_for is not None:
+                # Extract expected output value for comparison
+                expected_value = item.expected_output
+                if eval_key is not None and isinstance(expected_value, str):
+                    try:
+                        expected_json = json.loads(expected_value)
+                        if isinstance(expected_json, dict) and eval_key in expected_json:
+                            expected_value = expected_json[eval_key]
+                    except json.JSONDecodeError:
+                        pass
+                elif eval_key is not None and isinstance(expected_value, dict) and eval_key in expected_value:
+                    expected_value = expected_value[eval_key]
+
+                # Apply different filtering logic based on the evaluation function
+                if eval_function == "simple_exact_comparison" or not isinstance(expected_value, list):
+                    should_score = expected_value in score_only_for
+                else:
+                    should_score = any(item in score_only_for for item in expected_value)
+
+            # Record the score in Langfuse if it should be scored
+            if should_score:
+                langfuse.score(
+                    trace_id=trace_id,
+                    name=eval_name,
+                    value=eval_score,
                 )
-
-            # Record the score in Langfuse
-            langfuse.score(
-                trace_id=trace_id,
-                name=eval_name,
-                value=eval_score,
-            )
-
-        # Keep the original scores for backward compatibility
-        # langfuse.score(
-        #     trace_id=trace_id,
-        #     name="exact_match",
-        #     value=is_correct,
-        # )
-        # langfuse.score(
-        #     trace_id=trace_id,
-        #     name=affect.lower(),
-        #     value=is_correct,
-        # )
 
 
 def run_experiment(prompt, dataset, experiment):
     with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
-        futures = [
-            executor.submit(process_item, item, prompt, experiment)
-            for item in dataset.items
-        ]
+        futures = [executor.submit(process_item, item, prompt, experiment) for item in dataset.items]
         # Wait for all futures to complete
         concurrent.futures.wait(futures)
 
 
 @observe()
-def llm_judge_evaluation(
-    output, expected_output, judge_prompt_name, judge_prompt_version=1, key=None
-):
+def llm_judge_evaluation(output, expected_output, judge_prompt_name, judge_prompt_version=1, key=None):
     """
     Use an LLM to evaluate the quality of the output compared to expected output.
 
@@ -234,9 +220,7 @@ def llm_judge_evaluation(
             expected_value = expected_output[key]
 
     try:
-        judge_prompt = langfuse.get_prompt(
-            judge_prompt_name, version=judge_prompt_version
-        )
+        judge_prompt = langfuse.get_prompt(judge_prompt_name, version=judge_prompt_version)
     except NotFoundError as e:
         print(f"Error: Judge prompt '{judge_prompt_name}' not found: {e}")
         return 0.0
@@ -252,9 +236,7 @@ def llm_judge_evaluation(
 
     try:
         completion = (
-            openai.chat.completions.create(
-                model="gpt-4o", messages=messages, langfuse_prompt=judge_prompt
-            )
+            openai.chat.completions.create(model="gpt-4o", messages=messages, langfuse_prompt=judge_prompt)
             .choices[0]
             .message.content
         )
@@ -366,13 +348,10 @@ def main():
     prompt_version = get_user_input("Great! Please input the version:")
     dataset_name = get_user_input("Great! Please input the name of the dataset:")
 
-    prompt, dataset, experiment = validate_against_langfuse(
-        prompt_name, prompt_version, dataset_name
-    )
+    prompt, dataset, experiment = validate_against_langfuse(prompt_name, prompt_version, dataset_name)
 
-    print(
-        f"\nGreat, we'll evaluate {prompt_name} (v{prompt_version}) with dataset {dataset_name}, which will be {len(dataset.items)} LLM queries."
-    )
+    print(f"\nGreat, we'll evaluate {prompt_name} (v{prompt_version}) with dataset {dataset_name},")
+    print(f"which will be {len(dataset.items)} LLM queries.")
 
     confirm = get_user_input("Continue (y/n): ").lower()
     if confirm != "y":
@@ -382,9 +361,8 @@ def main():
     # Run the experiment
     run_experiment(prompt, dataset, experiment)
 
-    print(
-        f"\nExperiment complete. You can find this experiment in your Langfuse dashboard. {os.getenv('LANGFUSE_HOST')}/project/{dataset.project_id}/datasets/{dataset.id}"
-    )
+    print("\nExperiment complete. You can find this experiment in your Langfuse dashboard.")
+    print(f"{os.getenv('LANGFUSE_HOST')}/project/{dataset.project_id}/datasets/{dataset.id}")
     # Ensure all events are sent to Langfuse
     langfuse_context.flush()
     langfuse.flush()
