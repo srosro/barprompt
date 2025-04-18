@@ -83,6 +83,19 @@ Edit the `.env` file with your:
 - OpenAI API key
 - Langfuse credentials (public key, secret key, host)
 
+### 4. Set Up Pre-commit Hooks
+
+This project uses pre-commit hooks to ensure code quality and consistency. The hooks include:
+- Ruff for linting (replacing flake8, isort, and autoflake)
+- Ruff-format for code formatting (following Black style conventions)
+- Various file checks (trailing whitespace, file endings, YAML validity, etc.)
+
+Install the pre-commit hooks with:
+
+```bash
+poetry run pre-commit install
+```
+
 ## Usage
 
 ### Running Prompt Evaluations
@@ -116,7 +129,7 @@ evaluations:
   - name: exact_match_affect
     function: simple_exact_comparison
     key: affect
-  
+
   # List inclusion comparison
   - name: negative_affects
     function: list_inclusion_comparison
@@ -125,7 +138,7 @@ evaluations:
       - "Anger"
       - "Sadness"
       - "Disgust"
-  
+
   # LLM-based evaluation
   - name: llm_quality_score
     function: llm_judge_evaluation
@@ -165,11 +178,36 @@ Checks if the output is included in a list of expected outputs. Returns a binary
 
 Uses an LLM as a judge to evaluate the quality of the output compared to the expected output. Returns a continuous score between 0 and 1.
 
+## Development Guidelines
+
+### Code Quality
+
+This project enforces code quality standards through pre-commit hooks. Before making any commits, always run:
+
+```bash
+poetry run pre-commit run --all-files
+```
+
+This will:
+1. Check and fix linting issues with Ruff
+2. Format the code according to standard Python conventions
+3. Ensure files are properly formatted (no trailing whitespace, proper line endings)
+4. Validate YAML and TOML files
+
+**IMPORTANT:** Only commit your changes after all pre-commit checks pass successfully. This ensures that all code in the repository maintains a consistent style and quality.
+
+To manually run specific hooks:
+```bash
+poetry run pre-commit run ruff --all-files        # Run only the linter
+poetry run pre-commit run ruff-format --all-files # Run only the formatter
+```
+
 ## Project Structure
 
 - `barprompt.py`: Main script for running prompt evaluations
 - `evaluation_config.yaml`: Configuration for evaluation methods
 - `pyproject.toml`: Poetry project configuration
+- `.pre-commit-config.yaml`: Pre-commit hooks configuration
 - `.env`: Environment variables (not tracked in git)
 - `.env.template`: Template for environment variables
 
@@ -177,7 +215,7 @@ Uses an LLM as a judge to evaluate the quality of the output compared to the exp
 
 1. Fork the repository
 2. Create a feature branch
-3. Commit your changes
+3. Commit your changes (after running pre-commit checks)
 4. Push to the branch
 5. Create a Pull Request
 

@@ -1,95 +1,118 @@
-import os
-import json
+"""BARPROMPT - A tool for evaluating prompts with Langfuse."""
+
 import concurrent.futures
+import json
+import os
+import sys
+
+from pathlib import Path
+from typing import Any
+
 import yaml
-from dotenv import load_dotenv
+
 from langfuse import Langfuse
-from langfuse.openai import openai
-from langfuse.decorators import observe, langfuse_context
 from langfuse.api.resources.commons.errors.not_found_error import NotFoundError
-
-
-load_dotenv()
+from langfuse.client import DatasetClient, DatasetItemClient, PromptClient
+from langfuse.decorators import langfuse_context, observe
+from langfuse.openai import openai
 
 langfuse = Langfuse()
 
 
-def print_welcome():
+def print_welcome() -> None:
+    """Display welcome message for the application."""
+    # Welcome message is printed to console intentionally as part of UI
     print("#####################################")
     print("# Welcome to BARPROMPT")
     print(
-        "# The app that integrates with Langfuse (prompt management) to help you test and compare different prompts effectively."
+        "# The app that integrates with Langfuse (prompt management) to help you test and compare "
+        "different prompts effectively.",
     )
     print("#####################################")
     print()
 
 
-def get_user_input(prompt):
-    return input(f"> {prompt}\n$ ").strip()
+def get_user_input(prompt_text: str) -> str:
+    """Get input from the user with a formatted prompt.
+
+    Args:
+        prompt_text: The text to display as prompt
+
+    Returns:
+        The user input as a string
+    """
+    return input(f"> {prompt_text}\n$ ").strip()
 
 
-def validate_against_langfuse(prompt_name, prompt_version, dataset_name):
+def validate_against_langfuse(
+    prompt_name: str,
+    prompt_version: str,
+    dataset_name: str,
+) -> tuple[PromptClient, DatasetClient, str]:
+    """Validate prompt and dataset existence in Langfuse.
+
+    Args:
+        prompt_name: Name of the prompt to evaluate
+        prompt_version: Version of the prompt
+        dataset_name: Name of the dataset to use
+
+    Returns:
+        Tuple containing prompt, dataset and experiment name
+    """
     try:
         prompt = langfuse.get_prompt(prompt_name, version=prompt_version)
     except NotFoundError:
-        exit()
+        sys.exit()
     try:
         dataset = langfuse.get_dataset(dataset_name)
     except NotFoundError as e:
         print(f"Error while fetching dataset '{dataset_name}': {e}")
-        exit()
+        sys.exit()
     experiment_name = f"{prompt_name}_v{prompt_version}"
     try:
         langfuse.get_dataset_run(dataset_name, experiment_name)
         print("Experiment already exists. Exiting.")
-        exit()
+        sys.exit()
     except NotFoundError:
         pass
     return prompt, dataset, experiment_name
 
 
 @observe()
-def run_prompt_evaluation(input_data, prompt):
+def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient) -> str:
+    """Run the evaluation of a prompt with input data.
+
+    Args:
+        input_data: The input data for the prompt
+        prompt: The prompt to evaluate
+
+    Returns:
+        The generated output from the model
+    """
     messages = [
         {"role": "system", "content": prompt.compile()},
         {"role": "user", "content": str(input_data)},
     ]
 
-    completion = (
+    return (
         openai.chat.completions.create(model="gpt-4o", messages=messages, langfuse_prompt=prompt)
         .choices[0]
         .message.content
     )
 
-    return completion
 
-
-# def simple_evaluation(output, expected_output):
-#     print(output)
-#     affect = output.get("affect", None)
-#     if not (affect and isinstance(affect, str)):
-#         return 0
-#     if affect.startswith("Other-"):
-#         affect = "Neutral"
-#     elif affect.startswith("Partner-"):
-#         affect = affect.replace("Partner-", "", 1)
-#     return affect in expected_output
-
-
-def load_evaluation_config(config_file="evaluation_config.yaml"):
-    """
-    Load evaluation configuration from YAML file.
+def load_evaluation_config(config_file: str = "evaluation_config.yaml") -> dict[str, list[dict[str, Any]]]:
+    """Load evaluation configuration from YAML file.
 
     Args:
         config_file: Path to the YAML configuration file
 
     Returns:
-        dict: The evaluation configuration
+        The evaluation configuration
     """
     try:
-        with open(config_file, "r") as file:
-            config = yaml.safe_load(file)
-        return config
+        with Path(config_file).open() as file:
+            return yaml.safe_load(file)
     except FileNotFoundError:
         print(f"Warning: Evaluation config file '{config_file}' not found. Using default evaluation.")
         # Return a default configuration
@@ -99,15 +122,42 @@ def load_evaluation_config(config_file="evaluation_config.yaml"):
                     "name": "exact_match",
                     "function": "simple_exact_comparison",
                     "key": "affect",
-                }
-            ]
+                },
+            ],
         }
-    except Exception as e:
+    except (OSError, yaml.YAMLError, PermissionError) as e:
         print(f"Error loading evaluation config: {e}")
         return {"evaluations": []}
 
 
-def process_item(item, prompt, experiment):
+def extract_expected_value(expected_output: str | dict[str, Any], eval_key: str | None) -> str | dict[str, Any]:
+    """Extract the expected value from the expected output.
+
+    Args:
+        expected_output: The expected output
+        eval_key: The key to extract from the expected output
+    """
+    expected_value = expected_output
+    if eval_key is not None and isinstance(expected_value, str):
+        try:
+            expected_json = json.loads(expected_value)
+            if isinstance(expected_json, dict) and eval_key in expected_json:
+                expected_value = expected_json[eval_key]
+        except json.JSONDecodeError:
+            pass
+    elif eval_key is not None and isinstance(expected_value, dict) and eval_key in expected_value:
+        expected_value = expected_value[eval_key]
+    return expected_value
+
+
+def process_item(item: DatasetItemClient, prompt: PromptClient, experiment: str) -> None:
+    """Process a single dataset item with the prompt.
+
+    Args:
+        item: The dataset item to process
+        prompt: The prompt to evaluate
+        experiment: The name of the experiment
+    """
     with item.observe(run_name=experiment) as trace_id:
         output = run_prompt_evaluation(item.input, prompt)
 
@@ -121,38 +171,11 @@ def process_item(item, prompt, experiment):
             eval_key = eval_item.get("key", None)
             score_only_for = eval_item.get("score_only_for", None)
 
-            # Determine which evaluation function to use
-            if eval_function == "llm_judge_evaluation":
-                judge_prompt_name = eval_item.get("args", {}).get("judge_prompt_name", "default_judge")
-                judge_prompt_version = eval_item.get("args", {}).get("judge_prompt_version", 1)
-
-                eval_score = llm_judge_evaluation(
-                    output,
-                    item.expected_output,
-                    judge_prompt_name,
-                    judge_prompt_version,
-                    eval_key,
-                )
-            elif eval_function == "list_inclusion_comparison":
-                eval_score = list_inclusion_comparison(output, item.expected_output, eval_key)
-            else:  # Default to simple_exact_comparison
-                eval_score = simple_exact_comparison(output, item.expected_output, eval_key)
-
             # Determine if the score should be recorded based on the score_only_for parameter
             should_score = True
             if score_only_for is not None:
                 # Extract expected output value for comparison
-                expected_value = item.expected_output
-                if eval_key is not None and isinstance(expected_value, str):
-                    try:
-                        expected_json = json.loads(expected_value)
-                        if isinstance(expected_json, dict) and eval_key in expected_json:
-                            expected_value = expected_json[eval_key]
-                    except json.JSONDecodeError:
-                        pass
-                elif eval_key is not None and isinstance(expected_value, dict) and eval_key in expected_value:
-                    expected_value = expected_value[eval_key]
-
+                expected_value = extract_expected_value(item.expected_output, eval_key)
                 # Apply different filtering logic based on the evaluation function
                 if eval_function == "simple_exact_comparison" or not isinstance(expected_value, list):
                     should_score = expected_value in score_only_for
@@ -161,6 +184,22 @@ def process_item(item, prompt, experiment):
 
             # Record the score in Langfuse if it should be scored
             if should_score:
+                # Determine which evaluation function to use
+                if eval_function == "llm_judge_evaluation":
+                    judge_prompt_name = eval_item.get("args", {}).get("judge_prompt_name", "default_judge")
+                    judge_prompt_version = eval_item.get("args", {}).get("judge_prompt_version", 1)
+
+                    eval_score = llm_judge_evaluation(
+                        output,
+                        item.expected_output,
+                        judge_prompt_name,
+                        judge_prompt_version,
+                        eval_key,
+                    )
+                elif eval_function == "list_inclusion_comparison":
+                    eval_score = list_inclusion_comparison(output, item.expected_output, eval_key)
+                else:  # Default to simple_exact_comparison
+                    eval_score = simple_exact_comparison(output, item.expected_output, eval_key)
                 langfuse.score(
                     trace_id=trace_id,
                     name=eval_name,
@@ -168,27 +207,60 @@ def process_item(item, prompt, experiment):
                 )
 
 
-def run_experiment(prompt, dataset, experiment):
+def run_experiment(prompt: PromptClient, dataset: DatasetClient, experiment: str) -> None:
+    """Run experiment with prompt and dataset.
+
+    Args:
+        prompt: The prompt to evaluate
+        dataset: The dataset to use
+        experiment: The name of the experiment
+    """
     with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
         futures = [executor.submit(process_item, item, prompt, experiment) for item in dataset.items]
         # Wait for all futures to complete
         concurrent.futures.wait(futures)
 
 
-@observe()
-def llm_judge_evaluation(output, expected_output, judge_prompt_name, judge_prompt_version=1, key=None):
+def extract_output_value(output: str | dict[str, Any], key: str | None = None) -> str | dict[str, Any]:
+    """Extract the value from the output.
+
+    Args:
+        output: The output to extract the value from
+        key: The key to extract from the output
     """
-    Use an LLM to evaluate the quality of the output compared to expected output.
+    output_value = output
+    if isinstance(output, str):
+        try:
+            output_json = json.loads(output)
+            if isinstance(output_json, dict) and key in output_json:
+                output_value = output_json[key]
+        except json.JSONDecodeError:
+            # Not valid JSON, use as is
+            pass
+    elif isinstance(output, dict) and key in output:
+        output_value = output[key]
+    return output_value
+
+
+@observe()
+def llm_judge_evaluation(
+    output: str | dict[str, Any],
+    expected_output: str | dict[str, Any],
+    judge_prompt_name: str,
+    judge_prompt_version: int = 1,
+    key: str | None = None,
+) -> float:
+    """Use an LLM to evaluate the quality of the output compared to expected output.
 
     Args:
         output: The actual output from the LLM
         expected_output: The expected output to compare against
         judge_prompt_name: Name of the prompt in langfuse to use for evaluation
-        judge_prompt_version: Version of the prompt to use (default: 1)
+        judge_prompt_version: Version of the prompt to use
         key: Optional key to extract from output and expected_output if they are JSON objects
 
     Returns:
-        float: A score between 0-1 indicating the quality of the match
+        A score between 0-1 indicating the quality of the match
     """
     # Extract values if key is provided and values are valid JSON
     output_value = output
@@ -196,28 +268,9 @@ def llm_judge_evaluation(output, expected_output, judge_prompt_name, judge_promp
 
     if key is not None:
         # Try to extract the key from output if it's JSON
-        if isinstance(output, str):
-            try:
-                output_json = json.loads(output)
-                if isinstance(output_json, dict) and key in output_json:
-                    output_value = output_json[key]
-            except json.JSONDecodeError:
-                # Not valid JSON, use as is
-                pass
-        elif isinstance(output, dict) and key in output:
-            output_value = output[key]
-
+        output_value = extract_output_value(output, key)
         # Try to extract the key from expected_output if it's JSON
-        if isinstance(expected_output, str):
-            try:
-                expected_json = json.loads(expected_output)
-                if isinstance(expected_json, dict) and key in expected_json:
-                    expected_value = expected_json[key]
-            except json.JSONDecodeError:
-                # Not valid JSON, use as is
-                pass
-        elif isinstance(expected_output, dict) and key in expected_output:
-            expected_value = expected_output[key]
+        expected_value = extract_expected_value(expected_output, key)
 
     try:
         judge_prompt = langfuse.get_prompt(judge_prompt_name, version=judge_prompt_version)
@@ -253,14 +306,18 @@ def llm_judge_evaluation(output, expected_output, judge_prompt_name, judge_promp
             print(f"Raw output: {completion}")
             return 0.0
 
-    except Exception as e:
+    except (openai.OpenAIError, ValueError, KeyError) as e:
         print(f"Error during evaluation: {e}")
         return 0.0
 
 
-def simple_exact_comparison(output, expected_output, key=None):
-    """
-    Performs a simple exact comparison between output and expected_output.
+def simple_exact_comparison(
+    output: str | dict[str, Any],
+    expected_output: str | dict[str, Any],
+    key: str | None = None,
+) -> int:
+    """Perform a simple exact comparison between output and expected_output.
+
     If key is provided, extracts that key from JSON objects before comparison.
 
     Args:
@@ -269,7 +326,7 @@ def simple_exact_comparison(output, expected_output, key=None):
         key: Optional key to extract from output and expected_output if they are JSON objects
 
     Returns:
-        int: 1 if the output matches expected_output, 0 otherwise
+        1 if the output matches expected_output, 0 otherwise
     """
     # Extract values if key is provided and values are valid JSON
     output_value = output
@@ -303,9 +360,13 @@ def simple_exact_comparison(output, expected_output, key=None):
     return 1 if output_value == expected_value else 0
 
 
-def list_inclusion_comparison(output, expected_output, key=None):
-    """
-    Checks if the output is included in the expected_output list.
+def list_inclusion_comparison(
+    output: str | dict[str, Any],
+    expected_output: str | dict[str, Any] | list[Any],
+    key: str | None = None,
+) -> int:
+    """Check if the output is included in the expected_output list.
+
     If key is provided, extracts that key from JSON objects before comparison.
 
     Args:
@@ -314,7 +375,7 @@ def list_inclusion_comparison(output, expected_output, key=None):
         key: Optional key to extract from output and expected_output if they are JSON objects
 
     Returns:
-        int: 1 if the output is in the expected_output list, 0 otherwise
+        1 if the output is in the expected_output list, 0 otherwise
     """
     # Extract values if key is provided and values are valid JSON
     output_value = output
@@ -339,7 +400,8 @@ def list_inclusion_comparison(output, expected_output, key=None):
     return 1 if output_value in expected_output else 0
 
 
-def main():
+def main() -> None:
+    """Execute the main application flow."""
     # Load environment variables
     print_welcome()
 
@@ -356,13 +418,14 @@ def main():
     confirm = get_user_input("Continue (y/n): ").lower()
     if confirm != "y":
         print("Experiment cancelled.")
-        exit()
+        sys.exit()
 
     # Run the experiment
     run_experiment(prompt, dataset, experiment)
 
     print("\nExperiment complete. You can find this experiment in your Langfuse dashboard.")
     print(f"{os.getenv('LANGFUSE_HOST')}/project/{dataset.project_id}/datasets/{dataset.id}")
+
     # Ensure all events are sent to Langfuse
     langfuse_context.flush()
     langfuse.flush()
