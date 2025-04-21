@@ -17,6 +17,7 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import openai
 
 langfuse = Langfuse()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL")
 
 
 def print_welcome() -> None:
@@ -68,7 +69,7 @@ def validate_against_langfuse(
     except NotFoundError as e:
         print(f"Error while fetching dataset '{dataset_name}': {e}")
         sys.exit()
-    experiment_name = f"{prompt_name}_v{prompt_version}"
+    experiment_name = f"{prompt_name}_v{prompt_version}_{OPENAI_MODEL}"
     try:
         langfuse.get_dataset_run(dataset_name, experiment_name)
         print("Experiment already exists. Exiting.")
@@ -95,7 +96,7 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
     ]
 
     completion: str | None = (
-        openai.chat.completions.create(model="gpt-4o", messages=messages, langfuse_prompt=prompt)
+        openai.chat.completions.create(model=OPENAI_MODEL, messages=messages, langfuse_prompt=prompt)
         .choices[0]
         .message.content
     )
@@ -298,7 +299,7 @@ def llm_judge_evaluation(
 
     try:
         completion = (
-            openai.chat.completions.create(model="gpt-4o", messages=messages, langfuse_prompt=judge_prompt)
+            openai.chat.completions.create(model=OPENAI_MODEL, messages=messages, langfuse_prompt=judge_prompt)
             .choices[0]
             .message.content
         )
