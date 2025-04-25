@@ -17,7 +17,8 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import openai
 
 langfuse = Langfuse()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL_TEMPERATURE = float(os.getenv("OPENAI_MODEL_TEMPERATURE", "0.2"))
 
 
 def print_welcome() -> None:
@@ -96,7 +97,12 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
     ]
 
     completion: str | None = (
-        openai.chat.completions.create(model=OPENAI_MODEL, messages=messages, langfuse_prompt=prompt)
+        openai.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            langfuse_prompt=prompt,
+            temperature=OPENAI_MODEL_TEMPERATURE,
+        )
         .choices[0]
         .message.content
     )
@@ -182,17 +188,23 @@ def process_item(item: DatasetItemClient, prompt: PromptClient, experiment: str)
             eval_function = eval_item.get("function", "simple_exact_comparison")
             eval_key = eval_item.get("key", None)
             score_only_for = eval_item.get("score_only_for", None)
+            filter_by = eval_item.get("filter_by", "output")  # 'output' or 'expected'
 
             # Determine if the score should be recorded based on the score_only_for parameter
             should_score = True
             if score_only_for is not None:
-                # Extract expected output value for comparison
-                expected_value = extract_expected_value(item.expected_output, eval_key)
-                # Apply different filtering logic based on the evaluation function
-                if eval_function == "simple_exact_comparison" or not isinstance(expected_value, list):
-                    should_score = expected_value in score_only_for
+                if filter_by == "expected":
+                    # Filter based on expected output
+                    expected_value = extract_expected_value(item.expected_output, eval_key)
+                    # Apply different filtering logic based on the evaluation function
+                    if eval_function == "simple_exact_comparison" or not isinstance(expected_value, list):
+                        should_score = expected_value in score_only_for
+                    else:
+                        should_score = any(item in score_only_for for item in expected_value)
                 else:
-                    should_score = any(item in score_only_for for item in expected_value)
+                    # Filter based on actual output (default)
+                    output_value = extract_output_value(output, eval_key)
+                    should_score = output_value in score_only_for
 
             # Record the score in Langfuse if it should be scored
             if should_score:
@@ -203,7 +215,7 @@ def process_item(item: DatasetItemClient, prompt: PromptClient, experiment: str)
 
                     eval_score = llm_judge_evaluation(
                         output,
-                        item.expected_output,
+                        item,
                         judge_prompt_name,
                         judge_prompt_version,
                         eval_key,
@@ -255,7 +267,7 @@ def extract_output_value(output: str | None, key: str | None = None) -> str | di
 @observe()
 def llm_judge_evaluation(
     output: str | None,
-    expected_output: str | dict[str, Any] | list[Any],
+    item: DatasetItemClient,
     judge_prompt_name: str,
     judge_prompt_version: int = 1,
     key: str | None = None,
@@ -264,7 +276,7 @@ def llm_judge_evaluation(
 
     Args:
         output: The actual output from the LLM
-        expected_output: The expected output to compare against
+        item: The dataset item to evaluate
         judge_prompt_name: Name of the prompt in langfuse to use for evaluation
         judge_prompt_version: Version of the prompt to use
         key: Optional key to extract from output and expected_output if they are JSON objects
@@ -274,13 +286,13 @@ def llm_judge_evaluation(
     """
     # Extract values if key is provided and values are valid JSON
     output_value: str | dict[str, Any] | None = output
-    expected_value = expected_output
+    expected_value = item.expected_output
 
     if key is not None:
         # Try to extract the key from output if it's JSON
         output_value = extract_output_value(output, key)
         # Try to extract the key from expected_output if it's JSON
-        expected_value = extract_expected_value(expected_output, key)
+        expected_value = extract_expected_value(item.expected_output, key)
 
     try:
         judge_prompt = langfuse.get_prompt(judge_prompt_name, version=judge_prompt_version)
@@ -289,7 +301,7 @@ def llm_judge_evaluation(
         return 0.0
 
     # Prepare evaluation context
-    evaluation_input = {"output": output_value, "expected_output": expected_value}
+    evaluation_input = {"output": output_value, "expected_output": expected_value, "input": item.input}
 
     # Call the LLM with the judge prompt
     messages = [
@@ -299,7 +311,12 @@ def llm_judge_evaluation(
 
     try:
         completion = (
-            openai.chat.completions.create(model=OPENAI_MODEL, messages=messages, langfuse_prompt=judge_prompt)
+            openai.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                langfuse_prompt=judge_prompt,
+                temperature=0,
+            )
             .choices[0]
             .message.content
         )
