@@ -138,11 +138,16 @@ evaluations:
       - "Anger"
       - "Sadness"
       - "Disgust"
+    filter_by: "expected"  # Only score items where expected output is in the score_only_for list
 
-  # LLM-based evaluation
+  # LLM-based evaluation with output filtering
   - name: llm_quality_score
     function: llm_judge_evaluation
     key: affect
+    score_only_for:
+      - "Joy"
+      - "Surprise"
+    filter_by: "output"  # Only score items where actual output is in the score_only_for list
     args:
       judge_prompt_name: quality_judge
       judge_prompt_version: 5
@@ -159,6 +164,9 @@ Each evaluation item can include:
   - `llm_judge_evaluation`: Uses an LLM to evaluate the quality (returns 0-1 score)
 - `key`: (Optional) Field to extract from JSON output for evaluation
 - `score_only_for`: (Optional) List of expected output values to score (others will be skipped)
+- `filter_by`: (Optional) Determines whether to filter using the expected output or actual output with `score_only_for`
+  - `"expected"`: Use expected output for filtering
+  - `"output"`: Use actual output for filtering (default)
 - `args`: Additional arguments for specific evaluation functions
   - For `llm_judge_evaluation`:
     - `judge_prompt_name`: Name of the prompt in Langfuse to use for evaluation
@@ -222,3 +230,15 @@ poetry run pre-commit run ruff-format --all-files # Run only the formatter
 ## License
 
 This project is licensed under the terms specified in the LICENSE file.
+
+#### Environment Variables
+
+The application uses the following environment variables:
+
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `OPENAI_MODEL`: The OpenAI model to use (defaults to "gpt-4o")
+- `OPENAI_MODEL_TEMPERATURE`: Temperature setting for model outputs (defaults to 0.2)
+- `MAX_WORKERS`: Number of concurrent workers for evaluation (defaults to 24)
+- `LANGFUSE_PUBLIC_KEY`: Your Langfuse public key
+- `LANGFUSE_SECRET_KEY`: Your Langfuse secret key
+- `LANGFUSE_HOST`: Langfuse API host

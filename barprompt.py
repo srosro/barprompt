@@ -19,6 +19,7 @@ from langfuse.openai import openai
 langfuse = Langfuse()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 OPENAI_MODEL_TEMPERATURE = float(os.getenv("OPENAI_MODEL_TEMPERATURE", "0.2"))
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "24"))
 
 
 def print_welcome() -> None:
@@ -239,7 +240,7 @@ def run_experiment(prompt: PromptClient, dataset: DatasetClient, experiment: str
         dataset: The dataset to use
         experiment: The name of the experiment
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_item, item, prompt, experiment) for item in dataset.items]
         # Wait for all futures to complete
         concurrent.futures.wait(futures)
