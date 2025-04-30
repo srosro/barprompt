@@ -17,8 +17,6 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import openai
 
 langfuse = Langfuse()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-OPENAI_MODEL_TEMPERATURE = float(os.getenv("OPENAI_MODEL_TEMPERATURE", "0.2"))
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "24"))
 
 
@@ -71,7 +69,7 @@ def validate_against_langfuse(
     except NotFoundError as e:
         print(f"Error while fetching dataset '{dataset_name}': {e}")
         sys.exit()
-    experiment_name = f"{prompt_name}_v{prompt_version}_{OPENAI_MODEL}"
+    experiment_name = f"{prompt_name}_v{prompt_version}"
     try:
         langfuse.get_dataset_run(dataset_name, experiment_name)
         print("Experiment already exists. Exiting.")
@@ -85,24 +83,61 @@ def validate_against_langfuse(
 def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient) -> str | None:
     """Run the evaluation of a prompt with input data.
 
+    This implementation compiles the Langfuse prompt with the variables coming
+    from the dataset item (``input_data``). The compiled prompt is then passed
+    as the **user** message to the model - mirroring the deployment pattern
+    used in the *codel-text* project.
+
+    In addition, the OpenAI generation parameters (model name and temperature)
+    are automatically picked up from the prompt's ``config`` field (if
+    provided). Otherwise, the process falls back to the environment defaults
+    configured at startup.
+
     Args:
-        input_data: The input data for the prompt
-        prompt: The prompt to evaluate
+        input_data: The input data (variables) for the prompt. Must be a
+            ``dict`` when the prompt expects template variables.
+        prompt: The Langfuse ``PromptClient`` instance to evaluate.
 
     Returns:
-        The generated output from the model
+        The generated output from the model.
     """
-    messages = [
-        {"role": "system", "content": prompt.compile()},
-        {"role": "user", "content": str(input_data)},
-    ]
+    # 1. Resolve model parameters: prefer prompt.config > env defaults
+    try:
+        model_config: dict[str, Any] = getattr(prompt, "config", {})
+    except AttributeError:  # Just in case the SDK changes
+        model_config = {}
 
+    # 2. Compile the prompt with the provided variables (if any)
+    compiled_prompt: str
+    if isinstance(input_data, dict):
+        try:
+            compiled_prompt = prompt.compile(**input_data)
+        except TypeError:
+            # If the prompt does not accept the given variables, fall back to a
+            # simple compile (this also supports static prompts without
+            # variables).
+            compiled_prompt = prompt.compile()
+    else:
+        compiled_prompt = prompt.compile()
+
+    # 3. Build the request parameters for the OpenAI completion
+    request_params = {
+        "model": model_config.get("model", "gpt-4o"),
+        "messages": [
+            {"role": "system", "content": model_config.get("system_message", "")},
+            {"role": "user", "content": compiled_prompt},
+        ],
+        "max_tokens": model_config.get("max_tokens", 1_000),
+        "temperature": model_config.get("temperature", 0.7),
+        "response_format": model_config.get("response_format", {"type": "json_object"}),
+        "timeout": model_config.get("timeout", model_config.get("request_timeout", 60)),
+    }
+
+    # 4. Execute the OpenAI completion
     completion: str | None = (
         openai.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
             langfuse_prompt=prompt,
-            temperature=OPENAI_MODEL_TEMPERATURE,
+            **request_params,
         )
         .choices[0]
         .message.content
@@ -275,10 +310,15 @@ def llm_judge_evaluation(
 ) -> float:
     """Use an LLM to evaluate the quality of the output compared to expected output.
 
+    This version mirrors `run_prompt_evaluation` and therefore:
+      1. Compiles the judge prompt with the evaluation input variables.
+      2. Extracts model parameters from `prompt.config` (fallback to env defaults).
+      3. Executes the OpenAI call with those dynamic parameters.
+
     Args:
         output: The actual output from the LLM
         item: The dataset item to evaluate
-        judge_prompt_name: Name of the prompt in langfuse to use for evaluation
+        judge_prompt_name: Name of the prompt in Langfuse to use for evaluation
         judge_prompt_version: Version of the prompt to use
         key: Optional key to extract from output and expected_output if they are JSON objects
 
@@ -301,34 +341,58 @@ def llm_judge_evaluation(
         print(f"Error: Judge prompt '{judge_prompt_name}' not found: {e}")
         return 0.0
 
-    # Prepare evaluation context
-    evaluation_input = {"output": output_value, "expected_output": expected_value, "input": item.input}
+    # ---------------------------------------------
+    # Build evaluation input and compile prompt
+    # ---------------------------------------------
+    evaluation_input = {
+        "output": output_value,
+        "expected_output": expected_value,
+        "input": item.input,
+    }
 
-    # Call the LLM with the judge prompt
-    messages = [
-        {"role": "system", "content": judge_prompt.compile()},
-        {"role": "user", "content": json.dumps(evaluation_input)},
-    ]
+    # 1. Resolve model parameters from prompt config (fallback to env defaults)
+    try:
+        model_config: dict[str, Any] = getattr(judge_prompt, "config", {})
+    except AttributeError:
+        model_config = {}
 
+    # 2. Compile the judge prompt with variables (if accepted)
+    try:
+        compiled_prompt = judge_prompt.compile(**evaluation_input)
+    except TypeError:
+        compiled_prompt = judge_prompt.compile()
+
+    # 3. Construct request params similarly to `run_prompt_evaluation`
+    request_params = {
+        "model": model_config.get("model", "gpt-4o"),
+        "messages": [
+            {"role": "system", "content": model_config.get("system_message", "")},
+            {"role": "user", "content": compiled_prompt},
+        ],
+        "max_tokens": model_config.get("max_tokens", 1000),
+        "temperature": model_config.get("temperature", 0.0),  # judges default to deterministic
+        "response_format": model_config.get("response_format", {"type": "json_object"}),
+        "timeout": model_config.get("timeout", model_config.get("request_timeout", 60)),
+    }
+
+    # ---------------------------------------------
+    # Execute OpenAI call
+    # ---------------------------------------------
     try:
         completion = (
             openai.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=messages,
                 langfuse_prompt=judge_prompt,
-                temperature=0,
+                **request_params,
             )
             .choices[0]
             .message.content
         )
 
-        # Parse the score from the completion
-        # Expecting a JSON response with a "score" field (value 0-1)
+        # Parse the score from the completion (expects JSON with "score")
         try:
             result = json.loads(completion)
             score = float(result.get("score", 0.0))
-            # Ensure score is between 0 and 1
-            return max(0.0, min(1.0, score))
+            return max(0.0, min(1.0, score))  # Clamp to [0,1]
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Error parsing judge output: {e}")
             print(f"Raw output: {completion}")

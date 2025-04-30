@@ -10,6 +10,8 @@ BarPrompt is a tool that integrates with Langfuse (prompt management) to help yo
 - Multiple evaluation methods including exact matching, list inclusion, and LLM-based evaluation
 - Flexible configuration via YAML for customizing evaluation strategies
 - Conditional scoring based on expected output values
+- Support for compiling prompts with variables from the dataset
+- Dynamic model configuration via prompt.config
 
 ## Prerequisites
 
@@ -116,6 +118,33 @@ barprompt
    - Select the dataset to evaluate against
 
 The script will run the evaluation and provide results through the Langfuse dashboard.
+
+### Prompt Configuration
+
+BarPrompt supports two ways to use prompts:
+
+1. **Variable Substitution**: Variables in prompts (using `{{variable_name}}` syntax) will be automatically populated with values from the dataset.
+
+2. **Model Configuration**: Parameters for the OpenAI API call can be defined in the prompt's `config` field in Langfuse:
+
+```json
+{
+  "model": "gpt-4o",
+  "system_message": "You are a helpful assistant.",
+  "max_tokens": 1000,
+  "temperature": 0.7,
+  "response_format": {"type": "json_object"},
+  "timeout": 60
+}
+```
+
+Supported configuration parameters:
+- `model`: The OpenAI model to use (defaults to "gpt-4o")
+- `system_message`: Content for the system message (optional)
+- `max_tokens`: Maximum tokens for the response (defaults to 1000)
+- `temperature`: Temperature setting (defaults to 0.7)
+- `response_format`: Response format for the API call (defaults to JSON)
+- `timeout`: Timeout in seconds (defaults to 60)
 
 ### Configuring Evaluations
 
@@ -236,8 +265,8 @@ This project is licensed under the terms specified in the LICENSE file.
 The application uses the following environment variables:
 
 - `OPENAI_API_KEY`: Your OpenAI API key
-- `OPENAI_MODEL`: The OpenAI model to use (defaults to "gpt-4o")
-- `OPENAI_MODEL_TEMPERATURE`: Temperature setting for model outputs (defaults to 0.2)
+- `OPENAI_MODEL`: The default OpenAI model to use (if not specified in prompt config)
+- `OPENAI_MODEL_TEMPERATURE`: Default temperature setting (if not specified in prompt config)
 - `MAX_WORKERS`: Number of concurrent workers for evaluation (defaults to 24)
 - `LANGFUSE_PUBLIC_KEY`: Your Langfuse public key
 - `LANGFUSE_SECRET_KEY`: Your Langfuse secret key
