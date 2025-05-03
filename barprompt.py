@@ -484,12 +484,12 @@ def main() -> None:
     # Run the experiment
     run_experiment(prompt, dataset, experiment)
 
-    print("\nExperiment complete. You can find this experiment in your Langfuse dashboard.")
-    print(f"{os.getenv('LANGFUSE_HOST')}/project/{dataset.project_id}/datasets/{dataset.id}")
-
     # Ensure all events are sent to Langfuse
     langfuse_context.flush()
     langfuse.flush()
+
+    print("\nExperiment complete. You can find this experiment in your Langfuse dashboard.")
+    print(f"{os.getenv('LANGFUSE_HOST')}/project/{dataset.project_id}/datasets/{dataset.id}")
 
 
 if __name__ == "__main__":
