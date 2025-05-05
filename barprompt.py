@@ -103,7 +103,7 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
     """
     # 1. Resolve model parameters: prefer prompt.config > env defaults
     try:
-        model_config: dict[str, Any] = getattr(prompt, "config", {})
+        model_config: dict[str, Any] = prompt.config.get("model_config", {})
     except AttributeError:  # Just in case the SDK changes
         model_config = {}
 
