@@ -103,29 +103,16 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
     """
     # 1. Resolve model parameters: prefer prompt.config > env defaults
     try:
-        model_config: dict[str, Any] = getattr(prompt, "config", {})
+        model_config: dict[str, Any] = prompt.config.get("model_config", {})
     except AttributeError:  # Just in case the SDK changes
         model_config = {}
 
-    # 2. Compile the prompt with the provided variables (if any)
-    compiled_prompt: str
-    if isinstance(input_data, dict):
-        try:
-            compiled_prompt = prompt.compile(**input_data)
-        except TypeError:
-            # If the prompt does not accept the given variables, fall back to a
-            # simple compile (this also supports static prompts without
-            # variables).
-            compiled_prompt = prompt.compile()
-    else:
-        compiled_prompt = prompt.compile()
-
-    # 3. Build the request parameters for the OpenAI completion
+    # 2. Build the request parameters for the OpenAI completion
     request_params = {
         "model": model_config.get("model", "gpt-4o"),
         "messages": [
-            {"role": "system", "content": model_config.get("system_message", "")},
-            {"role": "user", "content": compiled_prompt},
+            {"role": "system", "content": prompt.compile()},
+            {"role": "user", "content": json.dumps(input_data)},
         ],
         "max_tokens": model_config.get("max_tokens", 1_000),
         "temperature": model_config.get("temperature", 0.7),
@@ -133,7 +120,7 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
         "timeout": model_config.get("timeout", model_config.get("request_timeout", 60)),
     }
 
-    # 4. Execute the OpenAI completion with robust error handling
+    # 3. Execute the OpenAI completion with robust error handling
     try:
         completion: str | None = (
             openai.chat.completions.create(
