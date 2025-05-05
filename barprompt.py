@@ -133,15 +133,25 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
         "timeout": model_config.get("timeout", model_config.get("request_timeout", 60)),
     }
 
-    # 4. Execute the OpenAI completion
-    completion: str | None = (
-        openai.chat.completions.create(
-            langfuse_prompt=prompt,
-            **request_params,
+    # 4. Execute the OpenAI completion with robust error handling
+    try:
+        completion: str | None = (
+            openai.chat.completions.create(
+                langfuse_prompt=prompt,
+                **request_params,
+            )
+            .choices[0]
+            .message.content
         )
-        .choices[0]
-        .message.content
-    )
+    except (openai.OpenAIError, ValueError, KeyError, IndexError) as e:
+        # Catch common issues (API errors, malformed responses, missing choices, etc.)
+        # so that a single failure does not abort the processing of this dataset item.
+        print(
+            f"Error while generating completion for prompt '{prompt.name}' "
+            f"(version {prompt.version if hasattr(prompt, 'version') else 'unknown'}): {e}"
+        )
+        completion = None
+
     return completion
 
 
@@ -213,38 +223,46 @@ def process_item(item: DatasetItemClient, prompt: PromptClient, experiment: str)
         experiment: The name of the experiment
     """
     with item.observe(run_name=experiment) as trace_id:
-        output = run_prompt_evaluation(item.input, prompt)
+        try:
+            # ------------------------------------------------------------------
+            # 1) Run the prompt for this dataset item
+            # ------------------------------------------------------------------
+            output = run_prompt_evaluation(item.input, prompt)
 
-        # Load evaluation configuration
-        eval_config = load_evaluation_config()
+            # ------------------------------------------------------------------
+            # 2) Load the evaluation configuration
+            # ------------------------------------------------------------------
+            eval_config = load_evaluation_config()
 
-        # Apply the configured evaluations
-        for eval_item in eval_config.get("evaluations", []):
-            eval_name = eval_item.get("name", "unnamed_evaluation")
-            eval_function = eval_item.get("function", "simple_exact_comparison")
-            eval_key = eval_item.get("key", None)
-            score_only_for = eval_item.get("score_only_for", None)
-            filter_by = eval_item.get("filter_by", "output")  # 'output' or 'expected'
+            # ------------------------------------------------------------------
+            # 3) Apply each configured evaluation and record the score
+            # ------------------------------------------------------------------
+            for eval_item in eval_config.get("evaluations", []):
+                eval_name = eval_item.get("name", "unnamed_evaluation")
+                eval_function = eval_item.get("function", "simple_exact_comparison")
+                eval_key = eval_item.get("key", None)
+                score_only_for = eval_item.get("score_only_for", None)
+                filter_by = eval_item.get("filter_by", "output")  # 'output' or 'expected'
 
-            # Determine if the score should be recorded based on the score_only_for parameter
-            should_score = True
-            if score_only_for is not None:
-                if filter_by == "expected":
-                    # Filter based on expected output
-                    expected_value = extract_expected_value(item.expected_output, eval_key)
-                    # Apply different filtering logic based on the evaluation function
-                    if eval_function == "simple_exact_comparison" or not isinstance(expected_value, list):
-                        should_score = expected_value in score_only_for
+                # Determine if the score should be recorded based on the score_only_for parameter
+                should_score = True
+                if score_only_for is not None:
+                    if filter_by == "expected":
+                        expected_value = extract_expected_value(item.expected_output, eval_key)
+                        if eval_function == "simple_exact_comparison" or not isinstance(expected_value, list):
+                            should_score = expected_value in score_only_for
+                        else:
+                            should_score = any(val in score_only_for for val in expected_value)  # type: ignore[arg-type]
                     else:
-                        should_score = any(item in score_only_for for item in expected_value)
-                else:
-                    # Filter based on actual output (default)
-                    output_value = extract_output_value(output, eval_key)
-                    should_score = output_value in score_only_for
+                        output_value = extract_output_value(output, eval_key)
+                        should_score = output_value in score_only_for
 
-            # Record the score in Langfuse if it should be scored
-            if should_score:
-                # Determine which evaluation function to use
+                if not should_score:
+                    continue
+
+                # ------------------------------------------------------------------
+                # 4) Execute the selected evaluation function
+                # ------------------------------------------------------------------
                 if eval_function == "llm_judge_evaluation":
                     judge_prompt_name = eval_item.get("args", {}).get("judge_prompt_name", "default_judge")
                     judge_prompt_version = eval_item.get("args", {}).get("judge_prompt_version", 1)
@@ -258,13 +276,24 @@ def process_item(item: DatasetItemClient, prompt: PromptClient, experiment: str)
                     )
                 elif eval_function == "list_inclusion_comparison":
                     eval_score = list_inclusion_comparison(output, item.expected_output, eval_key)
-                else:  # Default to simple_exact_comparison
+                else:  # simple_exact_comparison & default
                     eval_score = simple_exact_comparison(output, item.expected_output, eval_key)
+
+                # ------------------------------------------------------------------
+                # 5) Persist the evaluation score in Langfuse
+                # ------------------------------------------------------------------
                 langfuse.score(
                     trace_id=trace_id,
                     name=eval_name,
                     value=eval_score,
                 )
+
+        except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
+            # Ensure that an unexpected error on this single item does not
+            # abort the whole experiment. The stack trace is still printed for
+            # debugging while the trace is marked with an error in Langfuse.
+            print(f"Error while processing dataset item {item.id if hasattr(item, 'id') else ''}: {exc}")
+            langfuse.error(trace_id=trace_id, name="process_item_error", error=str(exc))
 
 
 def run_experiment(prompt: PromptClient, dataset: DatasetClient, experiment: str) -> None:
