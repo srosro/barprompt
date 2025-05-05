@@ -148,7 +148,7 @@ def run_prompt_evaluation(input_data: str | dict[str, Any], prompt: PromptClient
         # so that a single failure does not abort the processing of this dataset item.
         print(
             f"Error while generating completion for prompt '{prompt.name}' "
-            f"(version {prompt.version if hasattr(prompt, 'version') else 'unknown'}): {e}"
+            f"(version {prompt.version if hasattr(prompt, 'version') else 'unknown'}): {e}",
         )
         completion = None
 
@@ -289,11 +289,14 @@ def process_item(item: DatasetItemClient, prompt: PromptClient, experiment: str)
                 )
 
         except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
-            # Ensure that an unexpected error on this single item does not
-            # abort the whole experiment. The stack trace is still printed for
-            # debugging while the trace is marked with an error in Langfuse.
-            print(f"Error while processing dataset item {item.id if hasattr(item, 'id') else ''}: {exc}")
-            langfuse.error(trace_id=trace_id, name="process_item_error", error=str(exc))
+            # Record the exception as an ERROR level event so it appears in the
+            # trace instead of failing due to a non-existent `langfuse.error`.
+            langfuse.event(
+                trace_id=trace_id,
+                name="process_item_error",
+                level="ERROR",
+                status_message=str(exc),
+            )
 
 
 def run_experiment(prompt: PromptClient, dataset: DatasetClient, experiment: str) -> None:
