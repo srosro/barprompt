@@ -45,6 +45,41 @@ def get_user_input(prompt_text: str) -> str:
     return input(f"> {prompt_text}\n$ ").strip()
 
 
+def validate_llm_judges(eval_config: dict[str, list[dict[str, Any]]]) -> tuple[str, str] | None:
+    """Validate LLM judges in evaluation config.
+
+    Args:
+        eval_config: The evaluation configuration
+
+    Returns:
+        Tuple of (judge_name, judge_version) if exactly one judge is found, None otherwise
+    """
+    llm_judges = []
+    for eval_item in eval_config.get("evaluations", []):
+        if eval_item.get("function") == "llm_judge_evaluation":
+            judge_prompt_name = eval_item.get("args", {}).get("judge_prompt_name")
+            if judge_prompt_name is None:
+                missing_judge_name = "judge_prompt_name is required in evaluation config"
+                raise ValueError(missing_judge_name)
+            judge_prompt_version = eval_item.get("args", {}).get("judge_prompt_version")
+            if judge_prompt_version is None:
+                missing_judge_version = "judge_prompt_version is required in evaluation config"
+                raise ValueError(missing_judge_version)
+            llm_judges.append((judge_prompt_name, judge_prompt_version))
+
+    if len(llm_judges) > 1:
+        error_msg = (
+            "Error: Multiple LLM judges found in evaluation config. Currently, only one LLM judge "
+            "can be used per experiment run because the judge name and version are included in the "
+            "experiment name to prevent duplicate runs. Found judges:\n"
+        )
+        for name, version in llm_judges:
+            error_msg += f"- {name} (v{version})\n"
+        raise ValueError(error_msg)
+
+    return llm_judges[0] if llm_judges else None
+
+
 def validate_against_langfuse(
     prompt_name: str,
     prompt_version: str,
@@ -69,7 +104,18 @@ def validate_against_langfuse(
     except NotFoundError as e:
         print(f"Error while fetching dataset '{dataset_name}': {e}")
         sys.exit()
-    experiment_name = f"{prompt_name}_v{prompt_version}"
+
+    # Load evaluation configuration to check for LLM judges
+    eval_config = load_evaluation_config()
+
+    # Validate LLM judges and get judge info if present
+    judge_info = ""
+    judge_result = validate_llm_judges(eval_config)
+    if judge_result:
+        judge_name, judge_version = judge_result
+        judge_info = f"_judge_{judge_name}_v{judge_version}"
+
+    experiment_name = f"{prompt_name}_v{prompt_version}{judge_info}"
     try:
         langfuse.get_dataset_run(dataset_name, experiment_name)
         print("Experiment already exists. Exiting.")
