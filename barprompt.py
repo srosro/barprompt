@@ -17,7 +17,7 @@ from langfuse.decorators import langfuse_context, observe
 from langfuse.openai import openai
 
 langfuse = Langfuse()
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "24"))
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
 
 
 def print_welcome() -> None:
