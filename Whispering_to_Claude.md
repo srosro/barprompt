@@ -86,10 +86,10 @@ echo "📁 Only code/$SUBDIRECTORY directory has been retained from: $BRANCH_OR_
 
 #### Update PROJECT_DIR and default sub-dir
 
-Edit the `PROJECT_DIR` variable on line 9 to point to your project directory:
+Edit the `PROJECT_DIR` variable on line 9 to point to you NEW project directory:
 
 ```bash
-PROJECT_DIR="/path/to/your/project"
+PROJECT_DIR="/path/to/your/new/gh-project"
 ```
 
 Also update the default subdirectory you want to keep.  In our case it defaults to `src`, which is our codebase. I don't want Claude looking at our whole repo because it blows out the context window.
@@ -101,10 +101,10 @@ Also update the default subdirectory you want to keep.  In our case it defaults 
 
 ### 3. Set Up Git Remote
 
-Navigate to your project directory and add the child repository as a remote:
+Navigate to your NEW project directory and add the codebase you're actively working on as a remote child repo:
 
 ```bash
-cd /path/to/your/project
+cd /path/to/your/new/gh-project
 git remote add child-repo https://github.com/username/repository-name.git
 ```
 
@@ -179,7 +179,7 @@ Test that everything is working:
 
 2. Verify git remote configuration:
    ```bash
-   cd /path/to/your/project
+   cd /path/to/your/new/gh-project
    git remote -v
    ```
 
