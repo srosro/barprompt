@@ -1,6 +1,6 @@
 # Git Subtree Update Script (us) Installation Guide
 
-This script automates the process of updating a git subtree by removing the existing subtree, adding a new one from a specified branch/commit, and keeping only the `src` directory.
+This script automates the process of updating a git subtree by removing the existing subtree, adding a new one from a specified branch/commit, and keeping only a specified subdirectory (defaults to `src`).
 
 ## Prerequisites
 
@@ -10,6 +10,11 @@ This script automates the process of updating a git subtree by removing the exis
 
 ## Installation Steps
 
+### 0. Create a NEW github repo
+This will be a mirror of the codebase (or a subfolder of the codebase) that you want to focus Claude on.
+
+https://github.com/new
+
 ### 1. Download the Script
 
 Save the script as `us.sh` in your project directory or a temporary location:
@@ -17,8 +22,8 @@ Save the script as `us.sh` in your project directory or a temporary location:
 ```bash
 #!/bin/bash
 
-# Script to update git subtree with a specific branch or commit
-# Usage: us <branch-name-or-commit-hash>
+# Script to update git subtree with a specific branch or commit and keep only a specified subdirectory
+# Usage: us <branch-name-or-commit-hash> [subdirectory]
 
 set -e  # Exit on any error
 
@@ -32,15 +37,19 @@ cd "$PROJECT_DIR" || {
 
 # Check if argument is provided
 if [ $# -eq 0 ]; then
-    echo "Usage: $0 <branch-name-or-commit-hash>"
+    echo "Usage: $0 <branch-name-or-commit-hash> [subdirectory]"
     echo "Example: $0 main"
-    echo "Example: $0 abc123def"
+    echo "Example: $0 main src"
+    echo "Example: $0 dev tests"
+    echo "Example: $0 abc123def docs"
     exit 1
 fi
 
 BRANCH_OR_COMMIT="$1"
+SUBDIRECTORY="${2:-src}"  # Default to 'src' if no subdirectory specified
 
 echo "🔄 Starting subtree update with: $BRANCH_OR_COMMIT"
+echo "📁 Will keep only: code/$SUBDIRECTORY"
 
 # Step 1: Remove existing code subtree and prepare for clean pull
 echo "📝 Step 1: Removing existing code subtree..."
@@ -48,31 +57,42 @@ git rm -rf code && \
 git commit -m "Remove code subtree to prepare for clean pull" && \
 git subtree add --prefix=code child-repo "$BRANCH_OR_COMMIT" --squash
 
-# Step 2: Keep only the src directory and clean up
-echo "📝 Step 2: Keeping only code/src directory..."
+# Step 2: Keep only the specified subdirectory and clean up
+echo "📝 Step 2: Keeping only code/$SUBDIRECTORY directory..."
+
+# Check if the specified subdirectory exists
+if [ ! -d "./code/$SUBDIRECTORY" ]; then
+    echo "❌ Error: Directory './code/$SUBDIRECTORY' does not exist in the subtree"
+    echo "Available directories in ./code/:"
+    ls -la ./code/
+    exit 1
+fi
+
 mkdir -p temp_backup && \
-cp -r ./code/src temp_backup/ && \
+cp -r "./code/$SUBDIRECTORY" temp_backup/ && \
 rm -rf ./code/* && \
 mkdir -p ./code && \
-mv temp_backup/src ./code/ && \
+mv "temp_backup/$SUBDIRECTORY" ./code/ && \
 rm -rf temp_backup && \
 git add ./code && \
-git commit -m "Keep only code/src directory" && \
+git commit -m "Keep only code/$SUBDIRECTORY directory" && \
 git push origin main
 
 echo "✅ Subtree update completed successfully!"
-echo "📁 Only code/src directory has been retained from: $BRANCH_OR_COMMIT"
+echo "📁 Only code/$SUBDIRECTORY directory has been retained from: $BRANCH_OR_COMMIT"
 ```
 
 ### 2. Configure the Script for Your Environment
 
-#### Update PROJECT_DIR
+#### Update PROJECT_DIR and default sub-dir
 
 Edit the `PROJECT_DIR` variable on line 9 to point to your project directory:
 
 ```bash
 PROJECT_DIR="/path/to/your/project"
 ```
+
+Also update the default subdirectory you want to keep.  In our case it defaults to `src`, which is our codebase. I don't want Claude looking at our whole repo because it blows out the context window.
 
 **Examples:**
 - `PROJECT_DIR="/Users/john/Projects/my-app"`
@@ -109,8 +129,6 @@ origin        https://github.com/username/main-repo.git (push)
 
 ### 4. Install the Script Globally
 
-#### Option A: User bin directory (Recommended)
-
 1. Create a personal bin directory:
    ```bash
    mkdir -p ~/bin
@@ -132,21 +150,22 @@ origin        https://github.com/username/main-repo.git (push)
    source ~/.zshrc
    ```
 
-#### Option B: System-wide installation
-
-```bash
-sudo cp us.sh /usr/local/bin/us
-sudo chmod +x /usr/local/bin/us
-```
-
 ## Usage
 
 Once installed, you can run the script from anywhere:
 
 ```bash
+# Keep default 'src' subdirectory
 us main
 us feature-branch
 us abc123def456
+
+# Keep a specific subdirectory
+us main src
+us main tests
+us dev docs
+us feature-branch components
+us abc123def frontend
 ```
 
 ## Verification
@@ -189,10 +208,6 @@ Test that everything is working:
 - Ensure you have write access to both repositories
 - Check that you're not in a detached HEAD state
 
-## Customization
+## Claude Integration
 
-You can modify the script to:
-- Change the target directory (currently `code`)
-- Keep different subdirectories (currently `src`)
-- Use different commit messages
-- Add additional validation or logging
+Now you should be able to go to https://claude.ai/projects, create a new project, and sync your "targeted" GitHub repo containing only the specific subdirectory you want Claude to focus on.
