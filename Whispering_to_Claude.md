@@ -15,7 +15,21 @@ This will be a mirror of the codebase (or a subfolder of the codebase) that you 
 
 https://github.com/new
 
-### 1. Download the Script
+### 1. Clone the New Repository
+
+```bash
+# Clone your new empty repository
+git clone https://github.com/username/your-new-repo.git
+cd your-new-repo
+
+# Add a README and make initial commit
+echo "# This project is not empty anymore" > README.md
+git add README.md
+git commit -m "Initial commit"
+git push origin main
+```
+
+### 2. Download the Script
 
 Save the script as `us.sh` in your project directory or a temporary location:
 
@@ -90,7 +104,7 @@ echo "✅ Subtree update completed successfully!"
 echo "📁 Only code/$SUBDIRECTORY directory has been retained from: $BRANCH_OR_COMMIT" 
 ```
 
-### 2. Configure the Script for Your Environment
+### 3. Configure the Script for Your Environment
 
 Edit the configuration variables at the top of the script:
 
@@ -109,7 +123,7 @@ Also update the default subdirectory you want to keep.  In our case it defaults 
 - `PROJECT_DIR="/home/user/code/my-project"`
 - `PROJECT_DIR="/Users/so/Hacking/codel-text-active"`
 
-### 3. Set Up Git Remote
+### 4. Set Up Git Remote
 
 Navigate to your NEW project directory and add the source repository (the original codebase you're pulling from) as a remote:
 
@@ -137,7 +151,7 @@ origin        https://github.com/username/your-new-repo.git (fetch)
 origin        https://github.com/username/your-new-repo.git (push)
 ```
 
-### 4. Install the Script Globally
+### 5. Install the Script Globally
 
 1. Create a personal bin directory:
    ```bash
