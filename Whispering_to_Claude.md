@@ -22,13 +22,17 @@ Save the script as `us.sh` in your project directory or a temporary location:
 ```bash
 #!/bin/bash
 
+# User Configuration
+PROJECT_DIR="/Users/delattre/tmp/codel-text"  # Your project directory (where you want to overwrite main)
+DEFAULT_SUBDIRECTORY="src"                    # Default subdirectory to keep (if not specified)
+SOURCE_REPO_NAME="source-repo"                # Name of the git remote for the source repo (where we pull FROM)
+MAIN_BRANCH="main"                            # Your main branch name
+
 # Script to update git subtree with a specific branch or commit and keep only a specified subdirectory
 # Usage: us <branch-name-or-commit-hash> [subdirectory]
 
 set -e  # Exit on any error
 
-# Change to the project directory
-PROJECT_DIR="/Users/so/Hacking/codel-text-active"
 echo "📂 Changing to project directory: $PROJECT_DIR"
 cd "$PROJECT_DIR" || {
     echo "❌ Error: Could not change to directory $PROJECT_DIR"
@@ -46,16 +50,20 @@ if [ $# -eq 0 ]; then
 fi
 
 BRANCH_OR_COMMIT="$1"
-SUBDIRECTORY="${2:-src}"  # Default to 'src' if no subdirectory specified
+SUBDIRECTORY="${2:-$DEFAULT_SUBDIRECTORY}"  # Use configured default if no subdirectory specified
 
 echo "🔄 Starting subtree update with: $BRANCH_OR_COMMIT"
 echo "📁 Will keep only: code/$SUBDIRECTORY"
 
-# Step 1: Remove existing code subtree and prepare for clean pull
-echo "📝 Step 1: Removing existing code subtree..."
-git rm -rf code && \
-git commit -m "Remove code subtree to prepare for clean pull" && \
-git subtree add --prefix=code child-repo "$BRANCH_OR_COMMIT" --squash
+# Step 1: Remove existing code subtree if it exists and prepare for clean pull
+echo "📝 Step 1: Preparing for clean pull..."
+if [ -d "code" ]; then
+    git rm -rf code
+    git commit -m "Remove code subtree to prepare for clean pull"
+fi
+
+# Add the subtree
+git subtree add --prefix=code $SOURCE_REPO_NAME "$BRANCH_OR_COMMIT" --squash
 
 # Step 2: Keep only the specified subdirectory and clean up
 echo "📝 Step 2: Keeping only code/$SUBDIRECTORY directory..."
@@ -76,20 +84,22 @@ mv "temp_backup/$SUBDIRECTORY" ./code/ && \
 rm -rf temp_backup && \
 git add ./code && \
 git commit -m "Keep only code/$SUBDIRECTORY directory" && \
-git push origin main
+git push --force origin $MAIN_BRANCH
 
 echo "✅ Subtree update completed successfully!"
-echo "📁 Only code/$SUBDIRECTORY directory has been retained from: $BRANCH_OR_COMMIT"
+echo "📁 Only code/$SUBDIRECTORY directory has been retained from: $BRANCH_OR_COMMIT" 
 ```
 
 ### 2. Configure the Script for Your Environment
 
-#### Update PROJECT_DIR and default sub-dir
-
-Edit the `PROJECT_DIR` variable on line 9 to point to you NEW project directory:
+Edit the configuration variables at the top of the script:
 
 ```bash
-PROJECT_DIR="/path/to/your/new/gh-project"
+# User Configuration
+PROJECT_DIR="/path/to/your/new/gh-project"  # Your project directory (where you want to overwrite main)
+DEFAULT_SUBDIRECTORY="src"                  # Default subdirectory to keep (if not specified)
+SOURCE_REPO_NAME="source-repo"              # Name of the git remote for the source repo (where we pull FROM)
+MAIN_BRANCH="main"                          # Your main branch name
 ```
 
 Also update the default subdirectory you want to keep.  In our case it defaults to `src`, which is our codebase. I don't want Claude looking at our whole repo because it blows out the context window.
@@ -101,17 +111,17 @@ Also update the default subdirectory you want to keep.  In our case it defaults 
 
 ### 3. Set Up Git Remote
 
-Navigate to your NEW project directory and add the codebase you're actively working on as a remote child repo:
+Navigate to your NEW project directory and add the source repository (the original codebase you're pulling from) as a remote:
 
 ```bash
 cd /path/to/your/new/gh-project
-git remote add child-repo https://github.com/username/repository-name.git
+git remote add source-repo https://github.com/username/repository-name.git
 ```
 
 **Example:**
 ```bash
 cd /Users/so/Hacking/codel-text-active
-git remote add child-repo https://github.com/srosro/ltmm-cleanup-v2.git
+git remote add source-repo https://github.com/srosro/ltmm-cleanup-v2.git
 ```
 
 **Verify the remote was added:**
@@ -121,10 +131,10 @@ git remote -v
 
 You should see output similar to:
 ```
-child-repo    https://github.com/username/repository-name.git (fetch)
-child-repo    https://github.com/username/repository-name.git (push)
-origin        https://github.com/username/main-repo.git (fetch)
-origin        https://github.com/username/main-repo.git (push)
+source-repo   https://github.com/username/repository-name.git (fetch)
+source-repo   https://github.com/username/repository-name.git (push)
+origin        https://github.com/username/your-new-repo.git (fetch)
+origin        https://github.com/username/your-new-repo.git (push)
 ```
 
 ### 4. Install the Script Globally
@@ -202,7 +212,7 @@ Test that everything is working:
 ### Git remote errors
 - Verify the remote exists: `git remote -v`
 - Check the repository URL is correct
-- Ensure you have access to the child repository
+- Ensure you have access to the source repository
 
 ### Permission errors
 - Ensure you have write access to both repositories
